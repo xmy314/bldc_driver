@@ -25,6 +25,9 @@ use hal::{
     clocks::init_clocks_and_plls, fugit::RateExtU32, pac, sio::Sio, watchdog::Watchdog, Clock,
 };
 
+// other drivers
+use as5600::As5600;
+
 #[entry]
 fn main() -> ! {
     info!("Program start");
@@ -52,19 +55,49 @@ fn main() -> ! {
     let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
     // get pins and setting up the external harware.
-    let _pins = rp2040_hal::gpio::Pins::new(
+    let pins = rp2040_hal::gpio::Pins::new(
         pac.IO_BANK0,
         pac.PADS_BANK0,
         sio.gpio_bank0,
         &mut pac.RESETS,
     );
 
-    info!("Hello, World");
+    // setup i2c
+    // Configure two pins as being I²C, not GPIO
+    let sda_pin = pins.gpio0.reconfigure();
+    let scl_pin = pins.gpio1.reconfigure();
+    // let not_an_scl_pin: Pin<_, FunctionI2C, PullUp> = pins.gpio20.reconfigure();
 
+    // Create the I²C drive, using the two pre-configured pins. This will fail
+    // at compile time if the pins are in the wrong mode, or if this I²C
+    // peripheral isn't available on these pins!
+    let i2c = hal::I2C::i2c0(
+        pac.I2C0,
+        sda_pin,
+        scl_pin, // Try `not_an_scl_pin` here
+        400.kHz(),
+        &mut pac.RESETS,
+        &clocks.system_clock,
+    );
+
+    let mut as5600 = As5600::new(i2c);
+    // wait a little for setting up?
+    delay.delay_ms(2000);
+
+    let agc = as5600.automatic_gain_control().unwrap();
+    let mag = as5600.magnitude().unwrap();
+    let zmco = as5600.zmco().unwrap();
+
+    info!("{:?}", agc);
+    info!("{:?}", mag);
+    info!("{:?}", zmco);
+
+    delay.delay_ms(2000);
+    info!("Hello, World");
     loop {
-        delay.delay_ms(500); // Don't comment out this line or RTT blows up
-        info!("yeah");
-        delay.delay_ms(500);
-        info!("nooo");
+        let value = as5600.angle().unwrap();
+        println!("{:?}", value);
+
+        delay.delay_ms(10); // Don't comment out this line or RTT blows up
     }
 }

@@ -17,6 +17,8 @@ panic-probe = { version = "0.3", features = ["print-defmt"] }
 rp2040-hal = { version = "0.10", features = ["rt", "critical-section-impl"] }
 rp2040-boot2 = "0.3"
 
+as5600 = "0.8.0"
+
 # cargo build/run
 [profile.dev]
 codegen-units = 1
