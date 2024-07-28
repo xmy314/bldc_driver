@@ -32,6 +32,7 @@ use hal::{
 // other drivers
 use as5600::As5600;
 mod bldc;
+mod tracker;
 
 #[entry]
 fn main() -> ! {
@@ -70,6 +71,25 @@ fn main() -> ! {
     // Init PWMs
     let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
 
+    // setup i2c
+    // Configure two pins as being I²C, not GPIO
+    let sda_pin = pins.gpio0.reconfigure();
+    let scl_pin = pins.gpio1.reconfigure();
+
+    // Create the I²C drive, using the two pre-configured pins. This will fail
+    // at compile time if the pins are in the wrong mode, or if this I²C
+    // peripheral isn't available on these pins!
+    let i2c = hal::I2C::i2c0(
+        pac.I2C0,
+        sda_pin,
+        scl_pin, // Try `not_an_scl_pin` here
+        400.kHz(),
+        &mut pac.RESETS,
+        &clocks.system_clock,
+    );
+
+    let mut as5600 = As5600::new(i2c);
+
     // Configure PWM slices
     let pwm0 = &mut pwm_slices.pwm0;
     pwm0.clr_ph_correct();
@@ -92,7 +112,7 @@ fn main() -> ! {
 
     // put in the motor specifications, not used for now.
     let motor_specification = bldc::BLDCMotor {
-        pole_pairs: 4,
+        pole_pairs: 7,
         kv: 1000,
         phase_resistance: 0.1667,
     };
@@ -109,7 +129,25 @@ fn main() -> ! {
 
     let mut toggle = true;
 
-    let mut phase: u16 = 0;
+    let offset = 480;
+
+    let mut rotor_position;
+    loop {
+        let result = as5600.angle();
+        match result {
+            Ok(i) => {
+                let rotor_angle = (i + offset) % 4096;
+                rotor_position = tracker::PositiontTracker::new(rotor_angle, 4096);
+                break;
+            }
+            Err(_) => {
+                println!("Angle Reading Unsuccessful");
+            }
+        };
+    }
+
+    let rotor_target = 1000.0;
+
     loop {
         toggle = !toggle;
         if toggle {
@@ -118,9 +156,34 @@ fn main() -> ! {
             led_pin.set_low().unwrap();
         }
 
-        motor_driver.set_phase(phase);
-        phase = (phase + 1) % 360;
+        loop {
+            let result = as5600.angle();
+            match result {
+                Ok(i) => {
+                    rotor_position.update((i + offset) % 4096);
 
-        delay.delay_us(100); // Don't comment out this line or RTT blows up
+                    let electrical_angle =
+                        ((7.0 * 360.0 / 4096.0 * (rotor_position.fractions as f32)) as u16) % 360;
+
+                    let rev_difference = 10.0 * (rotor_target - rotor_position.as_float());
+                    let capped_difference = if rev_difference < -1.0 {
+                        -1.0
+                    } else if rev_difference > 1.0 {
+                        1.0
+                    } else {
+                        rev_difference
+                    };
+                    motor_driver
+                        .set_phase(electrical_angle + (360.0 + 100.0 * capped_difference) as u16);
+
+                    break;
+                }
+                Err(_) => {
+                    println!("Angle Reading Unsuccessful");
+                }
+            };
+        }
+
+        delay.delay_us(1); // Don't comment out this line or RTT blows up
     }
 }
