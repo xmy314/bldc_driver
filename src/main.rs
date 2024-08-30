@@ -10,10 +10,6 @@
 #[used]
 pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_GENERIC_03H;
 
-use core::cmp;
-use core::cmp::Ordering;
-
-use bldc::BLDCDriver;
 // some debug stuff
 use cortex_m_rt::entry;
 use defmt::*;
@@ -21,18 +17,30 @@ use defmt_rtt as _;
 use panic_probe as _;
 
 // the shared library of all embeded systems.
-use embedded_hal::{delay::DelayNs, digital::OutputPin};
+use embedded_hal::{
+    self,
+    delay::{self, DelayNs},
+    digital::{ErrorType, OutputPin},
+};
 // specify the board
-use rp2040_hal as hal;
+use rp2040_hal::{self as hal, pac::watchdog::tick};
 // access the hardware
 use hal::{
     clocks::init_clocks_and_plls, fugit::RateExtU32, pac, sio::Sio, watchdog::Watchdog, Clock,
 };
 
-// other drivers
-use as5600::As5600;
-mod bldc;
-mod tracker;
+// Some useful core and math functionality
+use core::cmp;
+use core::cmp::Ordering;
+use core::f32::consts;
+use micromath::F32;
+
+// made drivers
+use foc_port::driver::{self, BLDCDriver};
+use foc_port::pid;
+use foc_port::sensor::{self, RotarySensor, RotorState};
+use foc_port::FOCMotor;
+use foc_port::{bldc_motor, sensor::magnetic_i2c};
 
 #[entry]
 fn main() -> ! {
@@ -57,7 +65,7 @@ fn main() -> ! {
     )
     .ok()
     .unwrap();
-    let _timer: hal::Timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+    let timer: hal::Timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
     let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
     // get pins and setting up the external harware.
@@ -67,9 +75,6 @@ fn main() -> ! {
         sio.gpio_bank0,
         &mut pac.RESETS,
     );
-
-    // Init PWMs
-    let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
 
     // setup i2c
     // Configure two pins as being I²C, not GPIO
@@ -88,16 +93,17 @@ fn main() -> ! {
         &clocks.system_clock,
     );
 
-    let mut as5600 = As5600::new(i2c);
+    // Init PWMs
+    let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
 
     // Configure PWM slices
     let pwm0 = &mut pwm_slices.pwm0;
     pwm0.clr_ph_correct();
-    pwm0.set_top(0x0fff);
+    pwm0.set_top(0x00ff);
     pwm0.enable();
     let pwm1 = &mut pwm_slices.pwm1;
     pwm1.clr_ph_correct();
-    pwm1.set_top(0x0fff);
+    pwm1.set_top(0x00ff);
     pwm1.enable();
 
     // get PWM channels
@@ -110,80 +116,39 @@ fn main() -> ! {
     channel0b.output_to(pins.gpio17);
     channel1a.output_to(pins.gpio18);
 
-    // put in the motor specifications, not used for now.
-    let motor_specification = bldc::BLDCMotor {
-        pole_pairs: 7,
-        kv: 1000,
-        phase_resistance: 0.1667,
-    };
+    let mut motor = bldc_motor::BLDCMotor::new(
+        bldc_motor::BLDCMotorSpecification {
+            pole_pairs: 7,
+            kv: 1000,
+            phase_resistance: 0.1,
+            phase_inductance: 0.1,
+        },
+        Some(sensor::RotorState::new(
+            &timer,
+            magnetic_i2c::MageticI2C::new(i2c, magnetic_i2c::AS5600_CONFIG),
+        )),
+        driver::bldc_driver_3pwm::BLDCDriver3PWM {
+            vdc: 7.0,
+            a: channel0a,
+            b: channel0b,
+            c: channel1a,
+        },
+        pid::PID::new(&timer, 10.0, 100.0, 0.1, 0.0),
+    );
 
-    // give the pwm channels to a motor driver.
-    let mut motor_driver = bldc::BLDCDriver3PWM {
-        motor_specification: motor_specification,
-        a: channel0a,
-        b: channel0b,
-        c: channel1a,
-    };
+    motor
+        .angle
+        .as_mut()
+        .unwrap()
+        .set_return_mapping(true, 0.455);
 
-    let mut led_pin = pins.gpio15.into_push_pull_output();
-
-    let mut toggle = true;
-
-    let offset = 480;
-
-    let mut rotor_position;
+    info!("Open Loop Testing");
     loop {
-        let result = as5600.angle();
-        match result {
-            Ok(i) => {
-                let rotor_angle = (i + offset) % 4096;
-                rotor_position = tracker::PositiontTracker::new(rotor_angle, 4096);
-                break;
-            }
-            Err(_) => {
-                println!("Angle Reading Unsuccessful");
-            }
-        };
-    }
-
-    let rotor_target = 1000.0;
-
-    loop {
-        toggle = !toggle;
-        if toggle {
-            led_pin.set_high().unwrap();
-        } else {
-            led_pin.set_low().unwrap();
-        }
-
-        loop {
-            let result = as5600.angle();
-            match result {
-                Ok(i) => {
-                    rotor_position.update((i + offset) % 4096);
-
-                    let electrical_angle =
-                        ((7.0 * 360.0 / 4096.0 * (rotor_position.fractions as f32)) as u16) % 360;
-
-                    let rev_difference = 10.0 * (rotor_target - rotor_position.as_float());
-                    let capped_difference = if rev_difference < -1.0 {
-                        -1.0
-                    } else if rev_difference > 1.0 {
-                        1.0
-                    } else {
-                        rev_difference
-                    };
-                    motor_driver
-                        .set_phase(electrical_angle + (360.0 + 100.0 * capped_difference) as u16);
-
-                    break;
-                }
-                Err(_) => {
-                    println!("Angle Reading Unsuccessful");
-                }
-            };
-        }
-
-        delay.delay_us(1); // Don't comment out this line or RTT blows up
+        motor.goto_blocking(314.15926);
+        info!("SETTLED");
+        delay.delay_ms(1000); // Don't comment out this line or RTT blows up
+        motor.goto_blocking(-314.15926);
+        info!("SETTLED");
+        delay.delay_ms(1000); // Don't comment out this line or RTT blows up
     }
 }
