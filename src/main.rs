@@ -142,6 +142,8 @@ fn main() -> ! {
         .unwrap()
         .set_return_mapping(true, 0.455);
 
+    // motor.calibrate_rotary_sensor();
+
     info!("Open Loop Testing");
     loop {
         motor.goto_blocking(314.15926);

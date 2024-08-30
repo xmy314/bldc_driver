@@ -51,6 +51,108 @@ impl<'a, B: driver::BLDCDriver, R: RotarySensor> BLDCMotor<'a, B, R> {
             pid: pid,
         }
     }
+
+    // calibrate the rotary sensor.
+    // requires a rotary sensor and a motor driver.
+    pub fn calibrate_rotary_sensor(&mut self) -> () {
+        // No point in calibrating the sensor is the sensor doesn't exist.
+        if self.angle.is_none() {
+            return;
+        }
+
+        // linear regression, the formula and explanation can be found here
+        // https://en.wikipedia.org/wiki/Simple_linear_regression#Normality_assumption
+        // y=mx+b where y is the measured angle and x is the input target angle.
+        let mut n: f32 = 0.0;
+        let mut x: f32 = 0.0;
+        let mut xx: f32 = 0.0;
+        let mut y: f32 = 0.0;
+        let mut xy: f32 = 0.0;
+
+        // try for "some number" of electrical cycles
+        let e_rev = 10;
+        // each cycle try "some number" of increments
+        let tick_per_e_rev = 18;
+        // smaller numbers are faster, larger numbers are more accurate
+        for i in 0..(e_rev * tick_per_e_rev) {
+            let target_rad = (i as f32) * consts::TAU / (tick_per_e_rev as f32);
+            let field_voltage = em::Vqd {
+                q: 0.0,
+                d: self.driver.get_voltage_limit(),
+            };
+            self.driver.set_rrf_voltage(field_voltage, target_rad);
+
+            // wait until rotor stops moving
+            self.angle.as_mut().unwrap().update();
+            let mut previous = self.angle.as_ref().unwrap().get_rads();
+            let mut count = 0;
+            while count < 50 {
+                self.angle.as_mut().unwrap().update();
+                let test = self.angle.as_ref().unwrap().get_rads();
+                // f32 cannot be exactly the same, but close enough for a period of time would be good enough.
+                if F32(test - previous).abs().0 < 0.002 {
+                    count += 1;
+                } else {
+                    count -= if count > 2 { 2 } else { count };
+                }
+                previous = 0.9 * previous + 0.1 * test;
+            }
+
+            self.angle.as_mut().unwrap().update();
+            let mech_rad = self.angle.as_ref().unwrap().get_rads();
+
+            n += 1.0;
+            x += target_rad;
+            xx += target_rad * target_rad;
+            y += mech_rad;
+            xy += target_rad * mech_rad;
+        }
+
+        // repeat the previous loop again take out the effect of hysterisis.
+        for i in (0..(e_rev * tick_per_e_rev)).rev() {
+            let target_rad = (i as f32) * consts::TAU / (tick_per_e_rev as f32);
+            let field_voltage = em::Vqd {
+                q: 0.0,
+                d: self.driver.get_voltage_limit(),
+            };
+            self.driver.set_rrf_voltage(field_voltage, target_rad);
+
+            // wait until rotor stops moving
+            self.angle.as_mut().unwrap().update();
+            let mut previous = self.angle.as_ref().unwrap().get_rads();
+            let mut count = 0;
+            while count < 50 {
+                self.angle.as_mut().unwrap().update();
+                let test = self.angle.as_ref().unwrap().get_rads();
+                // f32 cannot be exactly the same, but close enough for a period of time would be good enough.
+                if F32(test - previous).abs().0 < 0.002 {
+                    count += 1;
+                } else {
+                    count -= if count > 2 { 2 } else { count };
+                }
+                previous = 0.9 * previous + 0.1 * test;
+            }
+
+            self.angle.as_mut().unwrap().update();
+            let mech_rad = self.angle.as_ref().unwrap().get_rads();
+
+            n += 1.0;
+            x += target_rad;
+            xx += target_rad * target_rad;
+            y += mech_rad;
+            xy += target_rad * mech_rad;
+        }
+
+        // save some power
+        self.driver.off();
+
+        let m = (n * xy - x * y) / (n * xx - x * x); // this is 1 / pole pair
+        let k = ((xx * y - x * xy) / (n * xx - x * x))
+            % (consts::TAU / self.specification.pole_pairs as f32); // this is the smallest mechanical angle such that electrical angle is 0.
+        info!("s*pp {}, k {}", 1.0 / m, k);
+        self.specification.pole_pairs = F32(m).abs().round().0 as u8;
+        self.angle.as_mut().unwrap().set_return_mapping(m > 0.0, k);
+    }
 }
 
 // implement FOC control functions for BLDC motor
