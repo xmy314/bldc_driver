@@ -53,7 +53,7 @@ where
     /// Helper function for writing 2 bytes to the given register.
     fn write_u16(&mut self, command: u8, bytes: u16) -> Result<(), ErrorKind> {
         let bytes: [u8; 2] = bytes.to_be_bytes();
-        let buffer = [u8::from(command), bytes[0], bytes[1]];
+        let buffer = [command, bytes[0], bytes[1]];
         let result = self.bus.write(self.config.chip_address, &buffer);
         match result {
             Ok(some) => Ok(some),
@@ -69,8 +69,8 @@ where
     fn get_mechanical_angle(&mut self) -> Result<u16, ErrorKind> {
         let register_value = self.read_u16(self.config.angle_register)?;
         let masked_value = register_value
-            & ((1 << self.config.data_start_bit + 1) - 1)
-            & !((1 << 1 + self.config.data_start_bit - self.config.bit_resolution) - 1);
+            & ((1 << (self.config.data_start_bit + 1)) - 1)
+            & !((1 << (1 + self.config.data_start_bit - self.config.bit_resolution)) - 1);
         let scaled_value = masked_value << (16 - self.config.bit_resolution);
         Ok(scaled_value)
     }

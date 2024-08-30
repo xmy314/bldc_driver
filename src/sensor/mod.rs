@@ -76,14 +76,14 @@ impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
     pub fn set_return_mapping(&mut self, is_correct_direction: bool, reading_to_origin: f32) {
         // the following logic combines the existing transformation and the new transformation into a new transformation.
         if self.is_correct_direction {
-            self.reading_to_origin = self.reading_to_origin + reading_to_origin;
+            self.reading_to_origin += reading_to_origin;
         } else {
-            self.reading_to_origin = self.reading_to_origin - reading_to_origin;
+            self.reading_to_origin -= reading_to_origin;
         }
-        self.is_correct_direction = self.is_correct_direction ^ !is_correct_direction;
+        self.is_correct_direction ^= !is_correct_direction;
     }
 
-    pub fn update(&mut self) -> () {
+    pub fn update(&mut self) {
         let now: rp2040_hal::fugit::Instant<u64, 1, 1000000> = self.timer.get_counter();
         let delta_s = ((now - self.prior_update).to_micros() as f32) / 1000000.0;
 

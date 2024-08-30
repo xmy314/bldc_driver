@@ -17,7 +17,7 @@ pub struct BLDCDriver3PWM<A: pwm::SetDutyCycle, B: pwm::SetDutyCycle, C: pwm::Se
 }
 
 impl<A: pwm::SetDutyCycle, B: pwm::SetDutyCycle, C: pwm::SetDutyCycle> BLDCDriver3PWM<A, B, C> {
-    fn set_srf_voltage_unsafe(&mut self, v_srf: em::Vabc) -> () {
+    fn set_srf_voltage_unsafe(&mut self, v_srf: em::Vabc) {
         // Warning, this is not safe, use the safe ones instead.
         let minimum_v = if v_srf.a > v_srf.b {
             if v_srf.b > v_srf.c {
@@ -27,14 +27,12 @@ impl<A: pwm::SetDutyCycle, B: pwm::SetDutyCycle, C: pwm::SetDutyCycle> BLDCDrive
                 // a>b and c>b
                 v_srf.b
             }
+        } else if v_srf.a > v_srf.c {
+            // b>a>c
+            v_srf.c
         } else {
-            if v_srf.a > v_srf.c {
-                // b>a>c
-                v_srf.c
-            } else {
-                // b>a and c>a
-                v_srf.a
-            }
+            // b>a and c>a
+            v_srf.a
         };
 
         // This squezes out and extra 15.47% voltage by using the fact
@@ -58,13 +56,13 @@ impl<A: pwm::SetDutyCycle, B: pwm::SetDutyCycle, C: pwm::SetDutyCycle> BLDCDrive
         self.vdc / 1.732
     }
 
-    fn set_srf_voltage(&mut self, v_srf: em::Vabc) -> () {
+    fn set_srf_voltage(&mut self, v_srf: em::Vabc) {
         let v_srf_limited = v_srf.limit(self.get_voltage_limit());
 
         self.set_srf_voltage_unsafe(v_srf_limited);
     }
 
-    fn set_rrf_voltage(&mut self, v_rrf: em::Vqd, rotor_angle_rads: f32) -> () {
+    fn set_rrf_voltage(&mut self, v_rrf: em::Vqd, rotor_angle_rads: f32) {
         let v_srf_limited = v_rrf
             .limit(self.get_voltage_limit())
             .inverse_parks_transformation(rotor_angle_rads);
@@ -72,7 +70,7 @@ impl<A: pwm::SetDutyCycle, B: pwm::SetDutyCycle, C: pwm::SetDutyCycle> BLDCDrive
         self.set_srf_voltage_unsafe(v_srf_limited);
     }
 
-    fn off(&mut self) -> () {
+    fn off(&mut self) {
         self.a.set_duty_cycle_fully_off().unwrap();
         self.b.set_duty_cycle_fully_off().unwrap();
         self.c.set_duty_cycle_fully_off().unwrap();

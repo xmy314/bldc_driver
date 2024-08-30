@@ -15,11 +15,11 @@ impl<'a> PID<'a> {
     // constructor
     pub fn new(timer: &'a Timer, kp: f32, ki: f32, kd: f32, sp: f32) -> PID {
         PID {
-            timer: timer,
-            kp: kp,
-            ki: ki,
-            kd: kd,
-            sp: sp,
+            timer,
+            kp,
+            ki,
+            kd,
+            sp,
 
             is_new: true,
             prior_time: timer.get_counter(),
@@ -29,7 +29,7 @@ impl<'a> PID<'a> {
     }
 
     // set a set point
-    pub fn set(&mut self, sp: f32) -> () {
+    pub fn set(&mut self, sp: f32) {
         self.reset();
         self.sp = sp;
     }
@@ -41,12 +41,11 @@ impl<'a> PID<'a> {
         let error = self.sp - value;
 
         self.sum += error * dt;
-        let derror;
-        if !self.is_new {
-            derror = (error - self.prior_error) / dt;
+        let derror = if !self.is_new {
+            (error - self.prior_error) / dt
         } else {
-            derror = 0.0;
-        }
+            0.0
+        };
         self.is_new = false;
         self.prior_error = error;
         self.prior_time = now;

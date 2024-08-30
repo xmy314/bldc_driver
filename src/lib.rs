@@ -13,9 +13,9 @@ pub mod pid; // logic for pid
 // The control interface to 3 phase motors.
 // Once initialized, the internal components can be hidden away.
 pub trait FOCMotor {
-    fn goto(&mut self, target: f32) -> ();
-    fn goto_blocking(&mut self, target: f32) -> ();
-    fn foc_loop(&mut self) -> ();
+    fn goto(&mut self, target: f32);
+    fn goto_blocking(&mut self, target: f32);
+    fn foc_loop(&mut self);
 }
 
 // TODO: cogging torque compensation

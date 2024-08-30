@@ -45,16 +45,16 @@ impl<'a, B: driver::BLDCDriver, R: RotarySensor> BLDCMotor<'a, B, R> {
         pid: PID<'a>,
     ) -> BLDCMotor<'a, B, R> {
         BLDCMotor {
-            specification: specification,
+            specification,
             angle: rotor_angle,
-            driver: driver,
-            pid: pid,
+            driver,
+            pid,
         }
     }
 
     // calibrate the rotary sensor.
     // requires a rotary sensor and a motor driver.
-    pub fn calibrate_rotary_sensor(&mut self) -> () {
+    pub fn calibrate_rotary_sensor(&mut self) {
         // No point in calibrating the sensor is the sensor doesn't exist.
         if self.angle.is_none() {
             return;
@@ -158,14 +158,14 @@ impl<'a, B: driver::BLDCDriver, R: RotarySensor> BLDCMotor<'a, B, R> {
 // implement FOC control functions for BLDC motor
 impl<B: driver::BLDCDriver, R: RotarySensor> FOCMotor for BLDCMotor<'_, B, R> {
     // target is in radians
-    fn goto(&mut self, target: f32) -> () {
+    fn goto(&mut self, target: f32) {
         if self.angle.is_some() {
             self.pid.set(target);
         }
     }
 
     // target is in radians
-    fn goto_blocking(&mut self, target: f32) -> () {
+    fn goto_blocking(&mut self, target: f32) {
         if self.angle.is_some() {
             self.goto(target);
 
@@ -189,7 +189,7 @@ impl<B: driver::BLDCDriver, R: RotarySensor> FOCMotor for BLDCMotor<'_, B, R> {
         }
     }
 
-    fn foc_loop(&mut self) -> () {
+    fn foc_loop(&mut self) {
         // Update the rotor angle reading
         if self.angle.is_some() {
             self.angle.as_mut().unwrap().update();

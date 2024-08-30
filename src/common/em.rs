@@ -48,8 +48,8 @@ impl Vabc {
 
     pub fn limit(&self, v_limit: f32) -> Vabc {
         let (sa, ca) = (0.0, 1.0);
-        let (sb, cb) = (-0.5, -0.866025403784);
-        let (sc, cc) = (-0.5, 0.866025403784);
+        let (sb, cb) = (-0.5, -0.866_025_4);
+        let (sc, cc) = (-0.5, 0.866_025_4);
         let vx = (2.0 / 3.0) * (ca * self.a + cb * self.b + cc * self.c);
         let vy = (2.0 / 3.0) * (sa * self.a + sb * self.b + sc * self.c);
         let sqr_magnitude = vx * vx + vy * vy;
@@ -118,8 +118,8 @@ impl Iabc {
 
     pub fn limit(&self, i_limit: f32) -> Iabc {
         let (sa, ca) = (0.0, 1.0);
-        let (sb, cb) = (-0.5, -0.866025403784);
-        let (sc, cc) = (-0.5, 0.866025403784);
+        let (sb, cb) = (-0.5, -0.866_025_4);
+        let (sc, cc) = (-0.5, 0.866_025_4);
         let ix = (2.0 / 3.0) * (ca * self.a + cb * self.b + cc * self.c);
         let iy = (2.0 / 3.0) * (sa * self.a + sb * self.b + sc * self.c);
         let sqr_magnitude = ix * ix + iy * iy;
