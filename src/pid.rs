@@ -1,61 +1,127 @@
-use rp2040_hal::Timer;
-
-pub struct PID<'a> {
-    pub timer: &'a Timer,
+pub struct PID {
     pub kp: f32,
     pub ki: f32,
     pub kd: f32,
-    pub sp: f32,
-    is_new: bool,
-    prior_time: rp2040_hal::fugit::Instant<u64, 1, 1000000>,
-    prior_error: f32,
-    sum: f32,
+
+    pub windup_deletion: bool,
+    pub reversed: bool,
+
+    pid_state: PIDState,
 }
-impl<'a> PID<'a> {
-    // constructor
-    pub fn new(timer: &'a Timer, kp: f32, ki: f32, kd: f32, sp: f32) -> PID {
+
+/// internal state of PID controller
+enum PIDState {
+    /// set point isn't given
+    UNINITIATED,
+    /// set point is given but it doesn't know the current state
+    SET { sp: f32 },
+    /// in normal operation
+    NORM {
+        sp: f32,
+        p_error: f32,
+        i_error: f32,
+        d_error: f32, // only used for debugging
+        time: fugit::Instant<u64, 1, 1000000>,
+    },
+}
+
+/// PID controller
+///
+/// No auto tune included
+impl PID {
+    /// Constructor
+    pub fn new(kp: f32, ki: f32, kd: f32, reversed: bool, windup_deletion: bool) -> PID {
         PID {
-            timer,
             kp,
             ki,
             kd,
-            sp,
 
-            is_new: true,
-            prior_time: timer.get_counter(),
-            prior_error: 0.0,
-            sum: 0.0,
+            reversed,
+            windup_deletion,
+
+            pid_state: PIDState::UNINITIATED,
         }
     }
 
-    // set a set point
-    pub fn set(&mut self, sp: f32) {
-        self.reset();
-        self.sp = sp;
-    }
-
-    // takes in a reading and give out a value.
-    pub fn update_and_get_throttle(&mut self, value: f32) -> f32 {
-        let now = self.timer.get_counter();
-        let dt = (now - self.prior_time).to_micros() as f32 / 1_000_000.0;
-        let error = self.sp - value;
-
-        self.sum += error * dt;
-        let derror = if !self.is_new {
-            (error - self.prior_error) / dt
-        } else {
-            0.0
-        };
-        self.is_new = false;
-        self.prior_error = error;
-        self.prior_time = now;
-        self.kp * (error) + self.ki * (self.sum) + self.kd * (derror)
-    }
-
-    // reset accumulated states
+    /// Clear set point and reset accumulated states
     pub fn reset(&mut self) {
-        self.is_new = true;
-        self.prior_error = 0.0;
-        self.sum = 0.0;
+        self.pid_state = PIDState::UNINITIATED;
+    }
+
+    /// Set set point
+    pub fn set(&mut self, sp: f32) {
+        self.pid_state = PIDState::SET { sp: sp };
+    }
+
+    /// Inspect the error.
+    pub fn inspect_p_error(&mut self) -> Option<f32> {
+        match self.pid_state {
+            PIDState::NORM {
+                sp: _,
+                p_error,
+                i_error: _,
+                d_error: _,
+                time: _,
+            } => Some(p_error),
+            PIDState::SET { sp: _ } => None,
+            PIDState::UNINITIATED => None,
+        }
+    }
+
+    /// Step the pid loop,
+    ///     update internal state, and
+    ///     return a control value
+    pub fn update_and_get_throttle(
+        &mut self,
+        new_time: fugit::Instant<u64, 1, 1000000>,
+        value: f32,
+    ) -> f32 {
+        let (new_state, throttle) = match self.pid_state {
+            PIDState::NORM {
+                sp,
+                p_error,
+                i_error,
+                d_error: _,
+                time,
+            } => {
+                let dt = (new_time - time).to_micros() as f32 / 1_000_000.0;
+                let n_p_error = sp - value;
+
+                let mut n_i_error = i_error + p_error * dt;
+                if self.windup_deletion && n_i_error * p_error < 0.0 {
+                    n_i_error = 0.0;
+                }
+
+                let n_d_error = (n_p_error - p_error) / dt;
+
+                (
+                    PIDState::NORM {
+                        sp: sp,
+                        p_error: n_p_error,
+                        i_error: n_i_error,
+                        d_error: n_d_error,
+                        time: new_time,
+                    },
+                    self.kp * n_p_error + self.ki * n_i_error + self.kd * n_d_error,
+                )
+            }
+            PIDState::SET { sp } => (
+                PIDState::NORM {
+                    sp,
+                    p_error: 0.0,
+                    i_error: 0.0,
+                    d_error: 0.0,
+                    time: new_time,
+                },
+                self.kp * (sp - value),
+            ),
+            PIDState::UNINITIATED => (PIDState::UNINITIATED, 0.0),
+        };
+        self.pid_state = new_state;
+        if self.reversed {
+            -throttle
+        } else {
+            throttle
+        }
     }
 }

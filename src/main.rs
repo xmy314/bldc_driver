@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-#![allow(unused_imports)]
+// #![allow(unused_imports)]
 
 /// The linker will place this boot block at the start of our program image. We
 /// need this to help the ROM bootloader get our code up and running.
@@ -16,31 +16,20 @@ use defmt::*;
 use defmt_rtt as _;
 use panic_probe as _;
 
-// the shared library of all embeded systems.
-use embedded_hal::{
-    self,
-    delay::{self, DelayNs},
-    digital::{ErrorType, OutputPin},
-};
 // specify the board
-use rp2040_hal::{self as hal, pac::watchdog::tick};
+use rp2040_hal::{self as hal};
 // access the hardware
 use hal::{
-    clocks::init_clocks_and_plls, fugit::RateExtU32, pac, sio::Sio, watchdog::Watchdog, Clock,
+    adc::Adc, adc::AdcPin, clocks::init_clocks_and_plls, fugit::RateExtU32, pac, sio::Sio,
+    watchdog::Watchdog, Clock,
 };
 
-// Some useful core and math functionality
-use core::cmp;
-use core::cmp::Ordering;
-use core::f32::consts;
-use micromath::F32;
-
 // made drivers
-use foc_port::driver::{self, BLDCDriver};
-use foc_port::pid;
-use foc_port::sensor::{self, RotarySensor, RotorState};
-use foc_port::FOCMotor;
-use foc_port::{bldc_motor, sensor::magnetic_i2c};
+use foc_motor_control::driver::{self, BLDCDriver};
+use foc_motor_control::pid;
+use foc_motor_control::sensor::{self, CurrentSensor};
+use foc_motor_control::FOCMotor;
+use foc_motor_control::{bldc_motor, sensor::magnetic_i2c};
 
 #[entry]
 fn main() -> ! {
@@ -78,8 +67,8 @@ fn main() -> ! {
 
     // setup i2c
     // Configure two pins as being I²C, not GPIO
-    let sda_pin = pins.gpio0.reconfigure();
-    let scl_pin = pins.gpio1.reconfigure();
+    let sda_pin = pins.gpio16.reconfigure();
+    let scl_pin = pins.gpio17.reconfigure();
 
     // Create the I²C drive, using the two pre-configured pins. This will fail
     // at compile time if the pins are in the wrong mode, or if this I²C
@@ -97,60 +86,109 @@ fn main() -> ! {
     let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
 
     // Configure PWM slices
-    let pwm0 = &mut pwm_slices.pwm0;
-    pwm0.clr_ph_correct();
-    pwm0.set_top(0x00ff);
-    pwm0.enable();
-    let pwm1 = &mut pwm_slices.pwm1;
-    pwm1.clr_ph_correct();
-    pwm1.set_top(0x00ff);
-    pwm1.enable();
+    // "top" is proportional to period of pwm, so change it if there is an constant undesired high frequency noise.
+    let pwm4 = &mut pwm_slices.pwm4;
+    let pwm3 = &mut pwm_slices.pwm3;
+    let pwm2 = &mut pwm_slices.pwm2;
+    pwm4.set_ph_correct();
+    pwm3.set_ph_correct();
+    pwm2.set_ph_correct();
+    pwm4.set_top(0x04E1); // 100khz but due to phase correct is actually 50khz
+    pwm3.set_top(0x04E1); // 100khz but due to phase correct is actually 50khz
+    pwm2.set_top(0x04E1); // 100khz but due to phase correct is actually 50khz
+    pwm4.enable();
+    pwm3.enable();
+    pwm2.enable();
 
-    // get PWM channels
-    let channel0a = &mut pwm0.channel_a;
-    let channel0b = &mut pwm0.channel_b;
-    let channel1a = &mut pwm1.channel_a;
+    // get individual PWM channels
+    let channel4a = &mut pwm4.channel_a;
+    let channel4b = &mut pwm4.channel_b;
+    let channel3a = &mut pwm3.channel_a;
+    let channel3b = &mut pwm3.channel_b;
+    let channel2a = &mut pwm2.channel_a;
+    let channel2b = &mut pwm2.channel_b;
 
     // set the pwm channels to pins
-    channel0a.output_to(pins.gpio16);
-    channel0b.output_to(pins.gpio17);
-    channel1a.output_to(pins.gpio18);
+    channel4b.output_to(pins.gpio25);
+    channel4a.output_to(pins.gpio24);
+    channel3b.output_to(pins.gpio23);
+    channel3a.output_to(pins.gpio22);
+    channel2b.output_to(pins.gpio21);
+    channel2a.output_to(pins.gpio20);
+
+    // invert low side to avoid shorting
+    channel4a.set_inverted();
+    channel3a.set_inverted();
+    channel2a.set_inverted();
 
     let mut motor = bldc_motor::BLDCMotor::new(
+        &timer,
+        driver::bldc_driver_6pwm::BLDCDriver6PWM {
+            vdc: 11.1,        // supply, can be calculated and monitored, but didn't consider doing so.
+            half_deadtime: 6, // [7/65535] constrain
+            ah: channel4b,
+            al: channel4a,
+            bh: channel3b,
+            bl: channel3a,
+            ch: channel2b,
+            cl: channel2a,
+        },
         bldc_motor::BLDCMotorSpecification {
-            pole_pairs: 7,
-            kv: 1000,
-            phase_resistance: 0.1,
-            phase_inductance: 0.1,
+            mtpa_only: false,         // control scheme,
+            current_limit: 7.0,       // constrain
+            voltage_limit: 7.0,       // constrain
+            kv: 1000.0,               // given by motor manufaturer
+            pole_pairs: 7,            // calibratable
+            phase_resistance: 0.129,  // calibratable
+            phase_inductance: 0.0002, // calibratable
         },
         Some(sensor::RotorState::new(
             &timer,
             magnetic_i2c::MageticI2C::new(i2c, magnetic_i2c::AS5600_CONFIG),
         )),
-        driver::bldc_driver_3pwm::BLDCDriver3PWM {
-            vdc: 7.0,
-            a: channel0a,
-            b: channel0b,
-            c: channel1a,
-        },
-        pid::PID::new(&timer, 10.0, 100.0, 0.1, 0.0),
+        Some(sensor::hall_effect::HallEffectADC::new(
+            Adc::new(pac.ADC, &mut pac.RESETS),
+            AdcPin::new(pins.gpio26).unwrap(),
+            AdcPin::new(pins.gpio27).unwrap(),
+            AdcPin::new(pins.gpio28).unwrap(),
+            (1.0 / 0.132) * (3.3 / 4096.0), // amp per volt * volts per count = amp/count = G
+            (1.0 / 0.132) * 1.65,           // amp per volt * volts at no current = amp
+        )),
+        pid::PID::new(40.0, 5.0, 0.8, false, false), // no autotune
     );
 
+    motor.driver.off();
+
+    // measures resistance and inductance
+    // but inductance may not be accurate.
+    // motor.calibrate_phase_impedence();
+    // motor.driver.off();
+
+    // either use the former of the following two lines to calibrate.
+    // or use the lattar to directly directly set the values as calibration takes a moment..
+    // motor.calibrate_rotary_sensor();
     motor
-        .angle
+        .m_angle_tracker
         .as_mut()
         .unwrap()
-        .set_return_mapping(true, 0.455);
+        .set_return_mapping(false, 0.46);
 
-    // motor.calibrate_rotary_sensor();
+    info!("main loop");
 
-    info!("Open Loop Testing");
+    info!(
+        "{} {} {} {}",
+        motor.specification.voltage_limit,
+        motor.specification.current_limit,
+        motor.specification.phase_resistance,
+        motor.specification.phase_inductance,
+    );
+    delay.delay_ms(10);
+
+    info!("to 100");
+    motor.goto_blocking(0.375);
+    motor.driver.off();
+
     loop {
-        motor.goto_blocking(314.15926);
-        info!("SETTLED");
-        delay.delay_ms(1000); // Don't comment out this line or RTT blows up
-        motor.goto_blocking(-314.15926);
-        info!("SETTLED");
-        delay.delay_ms(1000); // Don't comment out this line or RTT blows up
+        delay.delay_ms(100);
     }
 }

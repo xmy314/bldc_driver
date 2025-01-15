@@ -6,16 +6,29 @@ use micromath::F32;
 use rp2040_hal::timer::Instant;
 use rp2040_hal::Timer;
 
+use crate::common::em::Iabc;
+
+pub mod hall_effect;
 pub mod magnetic_i2c;
 
-// Sensor is something that returns the rotor angle sensed by something relative to somewhere.
-// TODO: current sensing.
-
-pub trait RotarySensor {
-    fn get_mechanical_angle(&mut self) -> Result<u16, embedded_hal::i2c::ErrorKind>;
+#[derive(Debug, Clone)]
+pub enum SensorError {
+    COMMUNICATION,
 }
 
-// RotorTracker is a wrapper around sensors to track the number of turns, fraction of turns and an angular speed.
+pub trait RotarySensor {
+    fn get_mechanical_angle(&mut self) -> Result<u16, SensorError>;
+}
+
+pub trait CurrentSensor {
+    fn get_currents(&mut self) -> Result<Iabc, SensorError>;
+}
+
+/// RotorTracker is a wrapper around sensors to
+/// 1. correct direction of rotation,
+/// 2. compensate the angle wrt to useful origin,
+/// 3. track the number of turns,
+/// 4. and estimate the speed of the rotation
 pub struct RotorState<'a, RSensor: RotarySensor> {
     // source of rotor information
     sensor: RSensor,
@@ -53,7 +66,7 @@ impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
                     break;
                 }
                 Err(_) => {
-                    info!("angle reading initialization failed");
+                    info!("angle reading initialization failed.");
                 }
             };
         }
@@ -73,6 +86,7 @@ impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
         }
     }
 
+    /// correct direction of rotation and compensate the angle wrt to useful origin
     pub fn set_return_mapping(&mut self, is_correct_direction: bool, reading_to_origin: f32) {
         // the following logic combines the existing transformation and the new transformation into a new transformation.
         if self.is_correct_direction {
@@ -83,8 +97,9 @@ impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
         self.is_correct_direction ^= !is_correct_direction;
     }
 
+    /// get a new angle reading from the sensor
     pub fn update(&mut self) {
-        let now: rp2040_hal::fugit::Instant<u64, 1, 1000000> = self.timer.get_counter();
+        let now = self.timer.get_counter();
         let delta_s = ((now - self.prior_update).to_micros() as f32) / 1000000.0;
 
         let potential_reading = self.sensor.get_mechanical_angle();
@@ -116,7 +131,7 @@ impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
 
                 // quick exponential filter to get
                 self.rads_per_s =
-                    0.99 * self.rads_per_s + 0.01 * (self.rads - prior_rads) / delta_s;
+                    0.999 * self.rads_per_s + 0.001 * (self.rads - prior_rads) / delta_s;
             }
             Err(_) => {
                 // still update, just based on the prior results.
@@ -129,7 +144,7 @@ impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
         self.prior_update = now;
     }
 
-    // return the number of radians with respect to the selected origin and direction
+    /// return the number of radians with respect to the selected origin and direction
     pub fn get_rads(&self) -> f32 {
         if self.is_correct_direction {
             self.rads - self.reading_to_origin
@@ -138,7 +153,7 @@ impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
         }
     }
 
-    // return the angular velocity with respect to the selected direction
+    /// return the angular velocity with respect to the selected direction
     pub fn get_rads_per_s(&self) -> f32 {
         if self.is_correct_direction {
             self.rads_per_s
@@ -147,12 +162,12 @@ impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
         }
     }
 
-    // return the number of turns, whole and fractional, with respect to the selected origin and direction
+    /// return the number of turns, whole and fractional, with respect to the selected origin and direction
     pub fn get_revs(&self) -> f32 {
         self.get_rads() / consts::TAU
     }
 
-    // return the fraction of a turn with respect to the selected origin and direction
+    /// return the fraction of a turn with respect to the selected origin and direction
     pub fn get_fract(&self) -> f32 {
         self.get_revs() % 1.0
     }

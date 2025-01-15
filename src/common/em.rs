@@ -1,41 +1,57 @@
 use core::f32::consts;
 use micromath::F32;
 
-// electromagnetic quantities.
+/// electrical angle
+#[derive(Clone, Copy)]
+pub struct EAngle(pub f32);
 
-// abc
-// or stator reference frame
-// or srf
+/// mechanical angle
+#[derive(Clone, Copy)]
+pub struct MAngle(pub f32);
+
+/// abc frame
+/// or stator reference frame
+/// or srf
+#[derive(Clone, Copy)]
 pub struct Vabc {
     pub a: f32,
     pub b: f32,
     pub c: f32,
 }
 
-// qd
-// or rotor reference frame
-// or rrf
+/// qd frame
+/// or rotor reference frame
+/// or rrf
+#[derive(Clone, Copy)]
 pub struct Vqd {
     pub q: f32,
     pub d: f32,
 }
-
+/// abc frame
+/// or stator reference frame
+/// or srf
+#[derive(Clone, Copy)]
 pub struct Iabc {
     pub a: f32,
     pub b: f32,
     pub c: f32,
 }
 
+/// qd frame
+/// or rotor reference frame
+/// or rrf
+#[derive(Clone, Copy)]
 pub struct Iqd {
     pub q: f32,
     pub d: f32,
 }
 
 impl Vabc {
-    pub fn parks_transformation(&self, rotor_angle_rads: f32) -> Vqd {
-        let (sa, ca) = F32(rotor_angle_rads).sin_cos();
-        let (sb, cb) = F32(rotor_angle_rads - consts::TAU / 3f32).sin_cos();
-        let (sc, cc) = F32(rotor_angle_rads + consts::TAU / 3f32).sin_cos();
+    /// From abc coordinate to qd coordinate
+    pub fn parks_transformation(&self, rotor_angle_rads: EAngle) -> Vqd {
+        let (sa, ca) = F32(rotor_angle_rads.0).sin_cos();
+        let (sb, cb) = F32(rotor_angle_rads.0 - consts::TAU / 3f32).sin_cos();
+        let (sc, cc) = F32(rotor_angle_rads.0 + consts::TAU / 3f32).sin_cos();
         Vqd {
             q: (2.0 / 3.0) * ca.0 * self.a
                 + (2.0 / 3.0) * cb.0 * self.b
@@ -46,6 +62,7 @@ impl Vabc {
         }
     }
 
+    /// Clamp the voltage based on maximum line to line voltage
     pub fn limit(&self, v_limit: f32) -> Vabc {
         let (sa, ca) = (0.0, 1.0);
         let (sb, cb) = (-0.5, -0.866_025_4);
@@ -54,8 +71,9 @@ impl Vabc {
         let vy = (2.0 / 3.0) * (sa * self.a + sb * self.b + sc * self.c);
         let sqr_magnitude = vx * vx + vy * vy;
         let sqr_limit = v_limit * v_limit;
+
         if sqr_magnitude > sqr_limit {
-            let s = F32(sqr_magnitude / sqr_limit).sqrt().0;
+            let s = F32(sqr_limit / sqr_magnitude).sqrt().0;
             Vabc {
                 a: s * self.a,
                 b: s * self.b,
@@ -72,10 +90,11 @@ impl Vabc {
 }
 
 impl Vqd {
-    pub fn inverse_parks_transformation(&self, rotor_angle_rads: f32) -> Vabc {
-        let (sa, ca) = F32(rotor_angle_rads).sin_cos();
-        let (sb, cb) = F32(rotor_angle_rads - consts::TAU / 3f32).sin_cos();
-        let (sc, cc) = F32(rotor_angle_rads + consts::TAU / 3f32).sin_cos();
+    /// From qd coordinate to abc coordinate
+    pub fn inverse_parks_transformation(&self, rotor_angle_rads: EAngle) -> Vabc {
+        let (sa, ca) = F32(rotor_angle_rads.0).sin_cos();
+        let (sb, cb) = F32(rotor_angle_rads.0 - consts::TAU / 3f32).sin_cos();
+        let (sc, cc) = F32(rotor_angle_rads.0 + consts::TAU / 3f32).sin_cos();
         Vabc {
             a: ca.0 * self.q + sa.0 * self.d,
             b: cb.0 * self.q + sb.0 * self.d,
@@ -83,11 +102,12 @@ impl Vqd {
         }
     }
 
+    /// Clamp the voltage based on maximum line to line voltage
     pub fn limit(&self, v_limit: f32) -> Vqd {
         let sqr_magnitude = self.d * self.d + self.q * self.q;
         let sqr_limit = v_limit * v_limit;
         if sqr_magnitude > sqr_limit {
-            let s = F32(sqr_magnitude / sqr_limit).sqrt().0;
+            let s = F32(sqr_limit / sqr_magnitude).sqrt().0;
             Vqd {
                 q: s * self.q,
                 d: s * self.d,
@@ -102,10 +122,11 @@ impl Vqd {
 }
 
 impl Iabc {
-    pub fn parks_transformation(&self, rotor_angle_rads: f32) -> Iqd {
-        let (sa, ca) = F32(rotor_angle_rads).sin_cos();
-        let (sb, cb) = F32(rotor_angle_rads - consts::TAU / 3f32).sin_cos();
-        let (sc, cc) = F32(rotor_angle_rads + consts::TAU / 3f32).sin_cos();
+    /// From abc coordinate to qd coordinate
+    pub fn parks_transformation(&self, rotor_angle_rads: EAngle) -> Iqd {
+        let (sa, ca) = F32(rotor_angle_rads.0).sin_cos();
+        let (sb, cb) = F32(rotor_angle_rads.0 - consts::TAU / 3f32).sin_cos();
+        let (sc, cc) = F32(rotor_angle_rads.0 + consts::TAU / 3f32).sin_cos();
         Iqd {
             q: (2.0 / 3.0) * ca.0 * self.a
                 + (2.0 / 3.0) * cb.0 * self.b
@@ -116,6 +137,7 @@ impl Iabc {
         }
     }
 
+    /// Clamp the current based on maximum line current
     pub fn limit(&self, i_limit: f32) -> Iabc {
         let (sa, ca) = (0.0, 1.0);
         let (sb, cb) = (-0.5, -0.866_025_4);
@@ -142,10 +164,11 @@ impl Iabc {
 }
 
 impl Iqd {
-    pub fn inverse_parks_transformation(&self, rotor_angle_rads: f32) -> Iabc {
-        let (sa, ca) = F32(rotor_angle_rads).sin_cos();
-        let (sb, cb) = F32(rotor_angle_rads - consts::TAU / 3f32).sin_cos();
-        let (sc, cc) = F32(rotor_angle_rads + consts::TAU / 3f32).sin_cos();
+    /// From qd coordinate to abc coordinate
+    pub fn inverse_parks_transformation(&self, rotor_angle_rads: EAngle) -> Iabc {
+        let (sa, ca) = F32(rotor_angle_rads.0).sin_cos();
+        let (sb, cb) = F32(rotor_angle_rads.0 - consts::TAU / 3f32).sin_cos();
+        let (sc, cc) = F32(rotor_angle_rads.0 + consts::TAU / 3f32).sin_cos();
         Iabc {
             a: ca.0 * self.q + sa.0 * self.d,
             b: cb.0 * self.q + sb.0 * self.d,
@@ -153,6 +176,7 @@ impl Iqd {
         }
     }
 
+    /// Clamp the current based on maximum line current
     pub fn limit(&self, i_limit: f32) -> Iqd {
         let sqr_magnitude = self.d * self.d + self.q * self.q;
         let sqr_limit = i_limit * i_limit;

@@ -1,9 +1,4 @@
-// Isolate the behaviour that connects RotorTracker to the specific as5600 sensor.
-// TODO:    separate sensor by means of communication, (eg pwm, quadruture, i2c, voltage)
-//          and have specific sensors be represented a constant struct that describes the communication.
-//          This is already done is the exisitng arduino foc library.
-
-use super::RotarySensor;
+use super::{RotarySensor, SensorError};
 use embedded_hal::i2c::{ErrorKind, I2c};
 
 pub struct MageticI2CConfig {
@@ -66,12 +61,17 @@ impl<I, E> RotarySensor for MageticI2C<I>
 where
     I: I2c<Error = E>,
 {
-    fn get_mechanical_angle(&mut self) -> Result<u16, ErrorKind> {
-        let register_value = self.read_u16(self.config.angle_register)?;
-        let masked_value = register_value
-            & ((1 << (self.config.data_start_bit + 1)) - 1)
-            & !((1 << (1 + self.config.data_start_bit - self.config.bit_resolution)) - 1);
-        let scaled_value = masked_value << (16 - self.config.bit_resolution);
-        Ok(scaled_value)
+    fn get_mechanical_angle(&mut self) -> Result<u16, SensorError> {
+        let register_value_result = self.read_u16(self.config.angle_register);
+        match register_value_result {
+            Ok(register_value) => {
+                let masked_value = register_value
+                    & ((1 << (self.config.data_start_bit + 1)) - 1)
+                    & !((1 << (1 + self.config.data_start_bit - self.config.bit_resolution)) - 1);
+                let scaled_value = masked_value << (16 - self.config.bit_resolution);
+                Ok(scaled_value)
+            }
+            Err(_) => Err(SensorError::COMMUNICATION),
+        }
     }
 }

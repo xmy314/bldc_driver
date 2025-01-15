@@ -4,10 +4,10 @@ use crate::driver::BLDCDriver;
 
 use embedded_hal::pwm;
 
-// Modify the "physical" field voltage in rotor reference frame,
-// when the three phases of the motor are connected to 3 pairs of complementary mosfet,
-// and controlled by pwm offset.
-
+/// Modify the "physical" field voltage in rotor reference frame,
+///
+/// When the three phases of the motor are connected to 3 pairs of complementary mosfet,
+/// and controlled by pwm signals.
 #[derive(Debug)]
 pub struct BLDCDriver3PWM<A: pwm::SetDutyCycle, B: pwm::SetDutyCycle, C: pwm::SetDutyCycle> {
     pub vdc: f32,
@@ -35,7 +35,7 @@ impl<A: pwm::SetDutyCycle, B: pwm::SetDutyCycle, C: pwm::SetDutyCycle> BLDCDrive
             v_srf.a
         };
 
-        // This squezes out and extra 15.47% voltage by using the fact
+        // This squezes out an extra 15.47% voltage by using the fact
         // the three phases are balanced and 120 degrees apart.
 
         let duty_a = ((v_srf.a - minimum_v) / self.vdc * 65535.0) as u16;
@@ -52,8 +52,9 @@ impl<A: pwm::SetDutyCycle, B: pwm::SetDutyCycle, C: pwm::SetDutyCycle> BLDCDrive
     for BLDCDriver3PWM<A, B, C>
 {
     fn get_voltage_limit(&self) -> f32 {
-        // root 3 for 3 phases.
-        self.vdc / 1.732
+        // 1.5 for 3 phases
+        // 1.5 = 1cos(0)-2*0.5*cos( 2*pi/3 )
+        self.vdc / 1.5
     }
 
     fn set_srf_voltage(&mut self, v_srf: em::Vabc) {
@@ -62,7 +63,7 @@ impl<A: pwm::SetDutyCycle, B: pwm::SetDutyCycle, C: pwm::SetDutyCycle> BLDCDrive
         self.set_srf_voltage_unsafe(v_srf_limited);
     }
 
-    fn set_rrf_voltage(&mut self, v_rrf: em::Vqd, rotor_angle_rads: f32) {
+    fn set_rrf_voltage(&mut self, v_rrf: em::Vqd, rotor_angle_rads: em::EAngle) {
         let v_srf_limited = v_rrf
             .limit(self.get_voltage_limit())
             .inverse_parks_transformation(rotor_angle_rads);
