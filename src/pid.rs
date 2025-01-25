@@ -1,3 +1,5 @@
+use embassy_time::Instant;
+
 pub struct PID {
     pub kp: f32,
     pub ki: f32,
@@ -21,7 +23,7 @@ enum PIDState {
         p_error: f32,
         i_error: f32,
         d_error: f32, // only used for debugging
-        time: fugit::Instant<u64, 1, 1000000>,
+        time: embassy_time::Instant,
     },
 }
 
@@ -71,11 +73,8 @@ impl PID {
     /// Step the pid loop,
     ///     update internal state, and
     ///     return a control value
-    pub fn update_and_get_throttle(
-        &mut self,
-        new_time: fugit::Instant<u64, 1, 1000000>,
-        value: f32,
-    ) -> f32 {
+    pub fn update_and_get_throttle(&mut self, value: f32) -> f32 {
+        let now = Instant::now();
         let (new_state, throttle) = match self.pid_state {
             PIDState::NORM {
                 sp,
@@ -84,7 +83,7 @@ impl PID {
                 d_error: _,
                 time,
             } => {
-                let dt = (new_time - time).to_micros() as f32 / 1_000_000.0;
+                let dt = (now - time).as_micros() as f32 / 1_000_000.0;
                 let n_p_error = sp - value;
 
                 let mut n_i_error = i_error + p_error * dt;
@@ -100,7 +99,7 @@ impl PID {
                         p_error: n_p_error,
                         i_error: n_i_error,
                         d_error: n_d_error,
-                        time: new_time,
+                        time: now,
                     },
                     self.kp * n_p_error + self.ki * n_i_error + self.kd * n_d_error,
                 )
@@ -111,7 +110,7 @@ impl PID {
                     p_error: 0.0,
                     i_error: 0.0,
                     d_error: 0.0,
-                    time: new_time,
+                    time: now,
                 },
                 self.kp * (sp - value),
             ),

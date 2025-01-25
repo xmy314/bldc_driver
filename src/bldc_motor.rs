@@ -1,7 +1,7 @@
 use core::f32::consts;
 use defmt::info;
+use embassy_time::Instant;
 use micromath::F32;
-use rp2040_hal::Timer;
 
 use crate::common::clamp;
 use crate::common::em::{self, EAngle, Iabc, Iqd, Vabc, Vqd};
@@ -45,28 +45,25 @@ pub struct BLDCMotorSpecification {
 
 // One type of motor that can employ FOC are the BLDC motors.
 // This is the implementation of it.
-pub struct BLDCMotor<'a, B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> {
-    pub timer: &'a Timer,
+pub struct BLDCMotor<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> {
     pub driver: B,
     pub specification: BLDCMotorSpecification,
-    pub m_angle_tracker: Option<RotorState<'a, R>>,
+    pub m_angle_tracker: Option<RotorState<R>>,
     pub amperage: Option<T>,
     pub theta_pid: PID,
 
     previous_command: MotorCommand,
 }
 
-impl<'a, B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> BLDCMotor<'a, B, R, T> {
+impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> BLDCMotor<B, R, T> {
     pub fn new(
-        timer: &'a Timer,
         driver: B,
         specification: BLDCMotorSpecification,
-        m_angle_tracker: Option<RotorState<'a, R>>,
+        m_angle_tracker: Option<RotorState<R>>,
         amperage_sensor: Option<T>,
         theta_pid: PID,
-    ) -> BLDCMotor<'a, B, R, T> {
+    ) -> BLDCMotor<B, R, T> {
         BLDCMotor {
-            timer,
             driver,
             specification,
             m_angle_tracker,
@@ -163,11 +160,11 @@ impl<'a, B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> BLDCMotor<'a,
                 b: 0.0,
                 c: 0.0,
             });
-            let start_time = self.timer.get_counter();
+            let start_time = Instant::now();
             let mut inner_l_estimator = LinearEstimator::new();
             loop {
                 let ia = amperage.get_currents().unwrap().a;
-                let t = (self.timer.get_counter() - start_time).to_micros() as f32 / 1_000_000.0;
+                let t = (Instant::now() - start_time).as_micros() as f32 / 1_000_000.0;
                 if ia > 0.95 * self.specification.current_limit {
                     self.driver.off();
                     break;
@@ -286,7 +283,7 @@ impl<'a, B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> BLDCMotor<'a,
 }
 
 /// implement FOC control functions for BLDC motor
-impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> FOCMotor for BLDCMotor<'_, B, R, T> {
+impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> FOCMotor for BLDCMotor<B, R, T> {
     /// set target in revolutions
     /// but doesn't execute the action
     fn goto(&mut self, target: f32) {
@@ -366,8 +363,7 @@ impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> FOCMotor for BLDC
 
         // treat as desired quature current.
         let desired_throttle = clamp(
-            self.theta_pid
-                .update_and_get_throttle(self.timer.get_counter(), mech_revs),
+            self.theta_pid.update_and_get_throttle(mech_revs),
             -i_max,
             i_max,
         );

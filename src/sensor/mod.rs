@@ -1,15 +1,15 @@
 use defmt::*;
+use embassy_time::Instant;
 
 use core::f32::consts;
 use micromath::F32;
 
-use rp2040_hal::timer::Instant;
-use rp2040_hal::Timer;
-
 use crate::common::em::Iabc;
 
+#[cfg(feature = "as5600")]
+pub mod as5600;
+
 pub mod hall_effect;
-pub mod magnetic_i2c;
 
 #[derive(Debug, Clone)]
 pub enum SensorError {
@@ -29,11 +29,10 @@ pub trait CurrentSensor {
 /// 2. compensate the angle wrt to useful origin,
 /// 3. track the number of turns,
 /// 4. and estimate the speed of the rotation
-pub struct RotorState<'a, RSensor: RotarySensor> {
+pub struct RotorState<RSensor: RotarySensor> {
     // source of rotor information
     sensor: RSensor,
     // source of temporal information
-    timer: &'a Timer,
 
     // number of full revolutions, rounded to negative infinity
     full_revs: i16,
@@ -53,16 +52,16 @@ pub struct RotorState<'a, RSensor: RotarySensor> {
     reading_to_origin: f32,
 }
 
-impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
-    pub fn new(timer: &'a Timer, mut sensor: RSensor) -> Self {
+impl<RSensor: RotarySensor> RotorState<RSensor> {
+    pub fn new(mut sensor: RSensor) -> Self {
         let initial_reading;
-        let now: fugit::Instant<u64, 1, 1000000>;
+        let now: Instant;
         loop {
             let result = sensor.get_mechanical_angle();
             match result {
                 Ok(i) => {
                     initial_reading = i;
-                    now = timer.get_counter();
+                    now = Instant::now();
                     break;
                 }
                 Err(_) => {
@@ -71,7 +70,6 @@ impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
             };
         }
         RotorState {
-            timer,
             sensor,
 
             full_revs: 0,
@@ -99,8 +97,8 @@ impl<'a, RSensor: RotarySensor> RotorState<'a, RSensor> {
 
     /// get a new angle reading from the sensor
     pub fn update(&mut self) {
-        let now = self.timer.get_counter();
-        let delta_s = ((now - self.prior_update).to_micros() as f32) / 1000000.0;
+        let now = Instant::now();
+        let delta_s = ((now - self.prior_update).as_micros() as f32) / 1000000.0;
 
         let potential_reading = self.sensor.get_mechanical_angle();
         match potential_reading {

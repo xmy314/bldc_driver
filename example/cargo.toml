@@ -1,0 +1,42 @@
+[package]
+edition = "2021"
+name = "foc-module-example"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+foc_motor_control = { version = "0.1.0", path = "../", features = ["as5600"] }
+
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+
+embassy-rp = { version = "0.3.0", features = [
+    "rp2040",
+    "defmt",
+    "time-driver",
+] }
+# needed only for the adc which requires interrupt
+embassy-executor = { version = "0.7.0", features = [
+    "arch-cortex-m",
+    "executor-interrupt",
+] }
+embassy-time = { version = "0.4.0", features = [
+    "defmt",
+    "defmt-timestamp-uptime",
+] }
+
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+
+as5600-driver = { package = "as5600", version = "0.8.0" }
+
+[profile.release]
+debug = 2
+lto = true
+opt-level = 'z'
+
+[profile.dev]
+debug = 2
+lto = true
+opt-level = "z"
