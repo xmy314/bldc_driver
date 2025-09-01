@@ -21,7 +21,9 @@ pub trait RotarySensor {
 }
 
 pub trait CurrentSensor {
-    fn get_currents(&mut self) -> Result<Iabc, SensorError>;
+    fn get_currents(
+        &mut self,
+    ) -> impl core::future::Future<Output = Result<Iabc, SensorError>> + Send;
 }
 
 /// RotorTracker is a wrapper around sensors to

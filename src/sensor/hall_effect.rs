@@ -1,14 +1,13 @@
 use super::{CurrentSensor, SensorError};
 use crate::common::em::*;
-use embassy_futures::block_on;
 use embassy_rp::adc;
+use embassy_rp::{self, dma};
 
 /// Uses an ADC with three of its ADC channels
 pub struct HallEffectADC<'a, M: adc::Mode> {
     pub adc: adc::Adc<'a, M>,
-    pub pin_a: adc::Channel<'a>,
-    pub pin_b: adc::Channel<'a>,
-    pub pin_c: adc::Channel<'a>,
+    pub pins: [adc::Channel<'a>; 3],
+    pub dma: embassy_rp::Peri<'a, dma::AnyChannel>,
 
     /// \[A/count\], typically calculate using
     /// \[A/V\] conversion rate in the hall effect sensor datasheet, and
@@ -23,6 +22,7 @@ pub struct HallEffectADC<'a, M: adc::Mode> {
 impl<'a, M: adc::Mode> HallEffectADC<'a, M> {
     pub fn new(
         adc: adc::Adc<'a, M>,
+        dma: embassy_rp::Peri<'a, dma::AnyChannel>,
         pin_a: adc::Channel<'a>,
         pin_b: adc::Channel<'a>,
         pin_c: adc::Channel<'a>,
@@ -31,9 +31,8 @@ impl<'a, M: adc::Mode> HallEffectADC<'a, M> {
     ) -> Self {
         Self {
             adc,
-            pin_a,
-            pin_b,
-            pin_c,
+            dma,
+            pins: [pin_a, pin_b, pin_c],
             amplification,
             offset,
         }
@@ -47,29 +46,24 @@ impl<'a, M: adc::Mode> HallEffectADC<'a, M> {
         adc::Channel<'a>,
         adc::Channel<'a>,
     ) {
-        (self.adc, self.pin_a, self.pin_b, self.pin_c)
+        let [pin_a, pin_b, pin_c] = self.pins;
+        (self.adc, pin_a, pin_b, pin_c)
     }
 }
 
 impl<'a> CurrentSensor for HallEffectADC<'a, adc::Async> {
-    fn get_currents(&mut self) -> Result<Iabc, SensorError> {
-        let ia = match block_on(self.adc.read(&mut self.pin_a)) {
-            Ok(ia) => ia,
-            Err(_) => return Err(SensorError::COMMUNICATION),
-        };
-        let ib = match block_on(self.adc.read(&mut self.pin_b)) {
-            Ok(ib) => ib,
-            Err(_) => return Err(SensorError::COMMUNICATION),
-        };
-        let ic = match block_on(self.adc.read(&mut self.pin_c)) {
-            Ok(ic) => ic,
-            Err(_) => return Err(SensorError::COMMUNICATION),
-        };
+    async fn get_currents(&mut self) -> Result<Iabc, SensorError> {
+        let mut buf = [0_u16; 3];
+        let div = 0; // 100kHz sample rate (48Mhz / 100kHz * 4ch - 1)
+        self.adc
+            .read_many_multichannel(&mut self.pins, &mut buf, div, self.dma.reborrow())
+            .await
+            .unwrap();
 
         Ok(Iabc {
-            a: ia as f32 * self.amplification - self.offset,
-            b: ib as f32 * self.amplification - self.offset,
-            c: ic as f32 * self.amplification - self.offset,
+            a: ((buf[0]) as f32) * self.amplification - self.offset,
+            b: ((buf[1]) as f32) * self.amplification - self.offset,
+            c: ((buf[2]) as f32) * self.amplification - self.offset,
         })
     }
 }

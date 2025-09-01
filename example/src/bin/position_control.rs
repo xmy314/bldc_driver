@@ -6,15 +6,16 @@
 use defmt::*;
 use defmt_rtt as _;
 use embassy_rp::gpio::Pull;
+use embassy_rp::peripherals::I2C0;
 use panic_probe as _;
 
 // specify the board
 use cortex_m_rt::entry;
 use embassy_rp::adc::{Adc, Channel, Config, InterruptHandler};
 use embassy_rp::bind_interrupts;
-use embassy_rp::i2c::{self, Config as I2cConfig};
+use embassy_rp::i2c::{self, Config as I2cConfig, InterruptHandler as I2cInterruptHandler};
 use embassy_rp::pwm::{Config as PwmConfig, Pwm};
-use embassy_time::{block_for, Duration, Timer};
+use embassy_time::{block_for, Duration};
 
 // made drivers
 use foc_motor_control::bldc_motor;
@@ -24,6 +25,7 @@ use foc_motor_control::sensor::{self};
 use foc_motor_control::FOCMotor;
 
 bind_interrupts!(struct Irqs {
+    I2C0_IRQ => I2cInterruptHandler<I2C0>;
     ADC_IRQ_FIFO => InterruptHandler;
 });
 
@@ -37,7 +39,7 @@ fn main() -> ! {
     // setup i2c0
     let sda_pin = p.PIN_16;
     let scl_pin = p.PIN_17;
-    let i2c = i2c::I2c::new_blocking(p.I2C0, scl_pin, sda_pin, I2cConfig::default());
+    let i2c = i2c::I2c::new_async(p.I2C0, scl_pin, sda_pin, Irqs, I2cConfig::default());
 
     // Configure PWM slices
     // "top" is proportional to period of pwm, so change it if there is an constant undesired high frequency noise.

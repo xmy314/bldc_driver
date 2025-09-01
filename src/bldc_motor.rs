@@ -1,10 +1,11 @@
 use core::f32::consts;
 use defmt::info;
+use embassy_futures::block_on;
 use embassy_time::Instant;
 use micromath::F32;
 
 use crate::common::clamp;
-use crate::common::em::{self, EAngle, Iabc, Iqd, Vabc, Vqd};
+use crate::common::em::{self, Iabc, Iqd, Vabc, Vqd};
 use crate::estimator::{AEstimator, LinearEstimator, ReducedEMLinearEstimator};
 use crate::pid::PID;
 use crate::sensor::{CurrentSensor, RotarySensor, RotorState};
@@ -119,7 +120,7 @@ impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> BLDCMotor<B, R, T
             // delay.delay_ms(10);
             let mut ma: ReducedEMLinearEstimator = ReducedEMLinearEstimator::new(0.02);
             loop {
-                ma.add(amperage.get_currents().unwrap().a);
+                ma.add(block_on(amperage.get_currents()).unwrap().a);
                 if let Some(correlation) = ma.get_square_pearson_correlation() {
                     if correlation < 0.02 && ma.get_n() > 20 {
                         break;
@@ -147,7 +148,7 @@ impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> BLDCMotor<B, R, T
             // delay until current doesn't change
             let mut ma: ReducedEMLinearEstimator = ReducedEMLinearEstimator::new(0.02);
             loop {
-                ma.add(amperage.get_currents().unwrap().a);
+                ma.add(block_on(amperage.get_currents()).unwrap().a);
                 if let Some(correlation) = ma.get_square_pearson_correlation() {
                     if correlation < 0.02 && ma.get_n() > 20 {
                         break;
@@ -163,7 +164,7 @@ impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> BLDCMotor<B, R, T
             let start_time = Instant::now();
             let mut inner_l_estimator = LinearEstimator::new();
             loop {
-                let ia = amperage.get_currents().unwrap().a;
+                let ia = block_on(amperage.get_currents()).unwrap().a;
                 let t = (Instant::now() - start_time).as_micros() as f32 / 1_000_000.0;
                 if ia > 0.95 * self.specification.current_limit {
                     self.driver.off();
@@ -229,14 +230,14 @@ impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> BLDCMotor<B, R, T
             for rev in 0..rev_count {
                 for tick in 0..tick_count {
                     let target_rad = match reverse {
-                        false => EAngle(
-                            ((tick + rev * tick_count) as f32) * consts::TAU / (tick_count as f32),
-                        ),
-                        true => EAngle(
+                        false => {
+                            ((tick + rev * tick_count) as f32) * consts::TAU / (tick_count as f32)
+                        }
+                        true => {
                             ((rev_count * tick_count - tick - rev * tick_count) as f32)
                                 * consts::TAU
-                                / (tick_count as f32),
-                        ),
+                                / (tick_count as f32)
+                        }
                     };
 
                     let field_voltage = em::Vqd {
@@ -263,7 +264,7 @@ impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> BLDCMotor<B, R, T
                     self.m_angle_tracker.as_mut().unwrap().update();
                     let mech_rad = self.m_angle_tracker.as_ref().unwrap().get_rads();
 
-                    estimator.add(target_rad.0, mech_rad);
+                    estimator.add(target_rad, mech_rad);
                 }
             }
         }
@@ -338,8 +339,7 @@ impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> FOCMotor for BLDC
         let mech_radps = m_angle_tracker.get_rads_per_s();
 
         // Convert current to the rrf field voltage with the said current as stable point.
-        let rotor_angle =
-            EAngle((mech_revs) * (self.specification.pole_pairs as f32) * consts::TAU);
+        let rotor_angle = (mech_revs) * (self.specification.pole_pairs as f32) * consts::TAU;
         let w = mech_radps * self.specification.pole_pairs as f32;
         let back_emf =
             w / (0.10471975512 * self.specification.kv * self.specification.pole_pairs as f32);
@@ -350,7 +350,7 @@ impl<B: driver::BLDCDriver, R: RotarySensor, T: CurrentSensor> FOCMotor for BLDC
         let z2 = reactance * reactance + resistance * resistance;
         let z = F32(z2).sqrt().0;
 
-        if let Ok(iabc) = self.amperage.as_mut().unwrap().get_currents() {
+        if let Ok(iabc) = block_on(self.amperage.as_mut().unwrap().get_currents()) {
             let measured_iqd = iabc.parks_transformation(rotor_angle);
             if let MotorCommand::Irrf(set_iqd) = self.previous_command {
                 info!(

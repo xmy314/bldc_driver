@@ -1,18 +1,18 @@
-use core::f32::consts;
+use defmt::*;
 use micromath::F32;
 
 /// electrical angle
-#[derive(Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Format)]
 pub struct EAngle(pub f32);
 
 /// mechanical angle
-#[derive(Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Format)]
 pub struct MAngle(pub f32);
 
 /// abc frame
 /// or stator reference frame
 /// or srf
-#[derive(Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Format)]
 pub struct Vabc {
     pub a: f32,
     pub b: f32,
@@ -22,15 +22,16 @@ pub struct Vabc {
 /// qd frame
 /// or rotor reference frame
 /// or rrf
-#[derive(Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Format)]
 pub struct Vqd {
     pub q: f32,
     pub d: f32,
 }
+
 /// abc frame
 /// or stator reference frame
 /// or srf
-#[derive(Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Format)]
 pub struct Iabc {
     pub a: f32,
     pub b: f32,
@@ -40,7 +41,7 @@ pub struct Iabc {
 /// qd frame
 /// or rotor reference frame
 /// or rrf
-#[derive(Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Format)]
 pub struct Iqd {
     pub q: f32,
     pub d: f32,
@@ -48,17 +49,13 @@ pub struct Iqd {
 
 impl Vabc {
     /// From abc coordinate to qd coordinate
-    pub fn parks_transformation(&self, rotor_angle_rads: EAngle) -> Vqd {
-        let (sa, ca) = F32(rotor_angle_rads.0).sin_cos();
-        let (sb, cb) = F32(rotor_angle_rads.0 - consts::TAU / 3f32).sin_cos();
-        let (sc, cc) = F32(rotor_angle_rads.0 + consts::TAU / 3f32).sin_cos();
+    pub fn parks_transformation(&self, rotor_angle_rads: f32) -> Vqd {
+        let (F32(sa), F32(ca)) = F32(rotor_angle_rads).sin_cos();
+        let alpha = self.a - 0.5 * (self.b + self.c);
+        let beta = 0.866025403784 * (self.b - self.c);
         Vqd {
-            q: (2.0 / 3.0) * ca.0 * self.a
-                + (2.0 / 3.0) * cb.0 * self.b
-                + (2.0 / 3.0) * cc.0 * self.c,
-            d: (2.0 / 3.0) * sa.0 * self.a
-                + (2.0 / 3.0) * sb.0 * self.b
-                + (2.0 / 3.0) * sc.0 * self.c,
+            q: 0.6666666666f32 * (ca * alpha + sa * beta),
+            d: 0.6666666666f32 * (sa * alpha - ca * beta),
         }
     }
 
@@ -91,14 +88,14 @@ impl Vabc {
 
 impl Vqd {
     /// From qd coordinate to abc coordinate
-    pub fn inverse_parks_transformation(&self, rotor_angle_rads: EAngle) -> Vabc {
-        let (sa, ca) = F32(rotor_angle_rads.0).sin_cos();
-        let (sb, cb) = F32(rotor_angle_rads.0 - consts::TAU / 3f32).sin_cos();
-        let (sc, cc) = F32(rotor_angle_rads.0 + consts::TAU / 3f32).sin_cos();
+    pub fn inverse_parks_transformation(&self, rotor_angle_rads: f32) -> Vabc {
+        let (F32(sa), F32(ca)) = F32(rotor_angle_rads).sin_cos();
+        let alpha = ca * self.q + sa * self.d;
+        let beta = sa * self.q - ca * self.d;
         Vabc {
-            a: ca.0 * self.q + sa.0 * self.d,
-            b: cb.0 * self.q + sb.0 * self.d,
-            c: cc.0 * self.q + sc.0 * self.d,
+            a: alpha,
+            b: -0.5 * alpha + 0.866025403784 * beta,
+            c: -0.5 * alpha - 0.866025403784 * beta,
         }
     }
 
@@ -123,17 +120,13 @@ impl Vqd {
 
 impl Iabc {
     /// From abc coordinate to qd coordinate
-    pub fn parks_transformation(&self, rotor_angle_rads: EAngle) -> Iqd {
-        let (sa, ca) = F32(rotor_angle_rads.0).sin_cos();
-        let (sb, cb) = F32(rotor_angle_rads.0 - consts::TAU / 3f32).sin_cos();
-        let (sc, cc) = F32(rotor_angle_rads.0 + consts::TAU / 3f32).sin_cos();
+    pub fn parks_transformation(&self, rotor_angle_rads: f32) -> Iqd {
+        let (F32(sa), F32(ca)) = F32(rotor_angle_rads).sin_cos();
+        let alpha = self.a - 0.5 * (self.b + self.c);
+        let beta = 0.866025403784 * (self.b - self.c);
         Iqd {
-            q: (2.0 / 3.0) * ca.0 * self.a
-                + (2.0 / 3.0) * cb.0 * self.b
-                + (2.0 / 3.0) * cc.0 * self.c,
-            d: (2.0 / 3.0) * sa.0 * self.a
-                + (2.0 / 3.0) * sb.0 * self.b
-                + (2.0 / 3.0) * sc.0 * self.c,
+            q: 0.6666666666f32 * (ca * alpha + sa * beta),
+            d: 0.6666666666f32 * (sa * alpha - ca * beta),
         }
     }
 
@@ -165,14 +158,14 @@ impl Iabc {
 
 impl Iqd {
     /// From qd coordinate to abc coordinate
-    pub fn inverse_parks_transformation(&self, rotor_angle_rads: EAngle) -> Iabc {
-        let (sa, ca) = F32(rotor_angle_rads.0).sin_cos();
-        let (sb, cb) = F32(rotor_angle_rads.0 - consts::TAU / 3f32).sin_cos();
-        let (sc, cc) = F32(rotor_angle_rads.0 + consts::TAU / 3f32).sin_cos();
+    pub fn inverse_parks_transformation(&self, rotor_angle_rads: f32) -> Iabc {
+        let (F32(sa), F32(ca)) = F32(rotor_angle_rads).sin_cos();
+        let alpha = ca * self.q + sa * self.d;
+        let beta = sa * self.q - ca * self.d;
         Iabc {
-            a: ca.0 * self.q + sa.0 * self.d,
-            b: cb.0 * self.q + sb.0 * self.d,
-            c: cc.0 * self.q + sc.0 * self.d,
+            a: alpha,
+            b: -0.5 * alpha + 0.866025403784 * beta,
+            c: -0.5 * alpha - 0.866025403784 * beta,
         }
     }
 

@@ -123,7 +123,7 @@ impl EMLinearEstimator {
 
     pub fn add(&mut self, x: f32, y: f32) {
         self.w = (1.0 - self.alpha) * self.w + self.alpha;
-        self.ww = (1.0 - self.alpha) * self.ww + self.alpha * self.alpha;
+        self.ww = (1.0 - self.alpha) * (1.0 - self.alpha) * self.ww + self.alpha * self.alpha;
         self.x = (1.0 - self.alpha) * self.x + self.alpha * x;
         self.xx = (1.0 - self.alpha) * self.xx + self.alpha * x * x;
         self.y = (1.0 - self.alpha) * self.y + self.alpha * y;
@@ -173,19 +173,19 @@ impl EMLinearEstimator {
     pub fn correlation_xx(&self) -> Option<f32> {
         match self.n {
             0 | 1 => None,
-            _ => Some((self.xx - self.x * self.x) / (self.w)),
+            _ => Some((self.xx - self.x * self.x / self.w) / (self.w)),
         }
     }
     pub fn correlation_yy(&self) -> Option<f32> {
         match self.n {
             0 | 1 => None,
-            _ => Some((self.yy - self.y * self.y) / (self.w)),
+            _ => Some((self.yy - self.y * self.y / self.w) / (self.w)),
         }
     }
     pub fn correlation_xy(&self) -> Option<f32> {
         match self.n {
             0 | 1 => None,
-            _ => Some((self.xy - self.x * self.y) / (self.w)),
+            _ => Some((self.xy - self.x * self.y / self.w) / (self.w)),
         }
     }
 
@@ -218,7 +218,7 @@ pub struct ReducedEMLinearEstimator {
     // wrapper of EMLinearEstimator
     // where x is successive whole numbers starting from 0.
     n: f32,
-    internal: EMLinearEstimator,
+    pub internal: EMLinearEstimator,
 }
 
 impl ReducedEMLinearEstimator {

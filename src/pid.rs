@@ -7,6 +7,7 @@ pub struct PID {
 
     pub windup_deletion: bool,
     pub reversed: bool,
+    pub output_saturation: Option<f32>,
 
     pid_state: PIDState,
 }
@@ -41,6 +42,8 @@ impl PID {
             reversed,
             windup_deletion,
 
+            output_saturation: None,
+
             pid_state: PIDState::UNINITIATED,
         }
     }
@@ -52,6 +55,25 @@ impl PID {
 
     /// Set set point
     pub fn set(&mut self, sp: f32) {
+        self.pid_state = match self.pid_state {
+            PIDState::NORM {
+                sp: _,
+                p_error,
+                i_error,
+                d_error,
+                time,
+            } => PIDState::NORM {
+                sp,
+                p_error,
+                i_error,
+                d_error,
+                time,
+            },
+            PIDState::SET { sp: _ } | PIDState::UNINITIATED => PIDState::SET { sp: sp },
+        }
+    }
+
+    pub fn set_with_clear(&mut self, sp: f32) {
         self.pid_state = PIDState::SET { sp: sp };
     }
 
@@ -65,6 +87,20 @@ impl PID {
                 d_error: _,
                 time: _,
             } => Some(p_error),
+            PIDState::SET { sp: _ } => None,
+            PIDState::UNINITIATED => None,
+        }
+    }
+
+    pub fn inspect_i_error(&mut self) -> Option<f32> {
+        match self.pid_state {
+            PIDState::NORM {
+                sp: _,
+                p_error: _,
+                i_error,
+                d_error: _,
+                time: _,
+            } => Some(i_error),
             PIDState::SET { sp: _ } => None,
             PIDState::UNINITIATED => None,
         }
@@ -84,14 +120,38 @@ impl PID {
                 time,
             } => {
                 let dt = (now - time).as_micros() as f32 / 1_000_000.0;
-                let n_p_error = sp - value;
+                let error = sp - value;
 
-                let mut n_i_error = i_error + p_error * dt;
-                if self.windup_deletion && n_i_error * p_error < 0.0 {
+                let n_p_error = self.kp * error;
+
+                let mut n_i_error = i_error + self.ki * (error * dt);
+
+                if self.windup_deletion && n_i_error * n_p_error < 0.0 {
                     n_i_error = 0.0;
                 }
 
-                let n_d_error = (n_p_error - p_error) / dt;
+                if let Some(max_output) = self.output_saturation {
+                    if n_i_error > max_output {
+                        n_i_error = max_output;
+                    } else if n_i_error < -max_output {
+                        n_i_error = -max_output;
+                    }
+                }
+
+                let n_d_error = self.kd * (error - p_error / self.kp) / dt;
+
+                let mut throttle = n_p_error + n_i_error + n_d_error;
+                throttle = if let Some(max_output) = self.output_saturation {
+                    if throttle > max_output {
+                        max_output
+                    } else if throttle < -max_output {
+                        -max_output
+                    } else {
+                        throttle
+                    }
+                } else {
+                    throttle
+                };
 
                 (
                     PIDState::NORM {
@@ -101,7 +161,7 @@ impl PID {
                         d_error: n_d_error,
                         time: now,
                     },
-                    self.kp * n_p_error + self.ki * n_i_error + self.kd * n_d_error,
+                    throttle,
                 )
             }
             PIDState::SET { sp } => (

@@ -106,26 +106,23 @@ impl<
         let (duty_ah, duty_al) = if duty_a < self.half_deadtime {
             (0, duty_a + self.half_deadtime)
         } else if duty_a > 65535 - self.half_deadtime {
-            (duty_a - self.half_deadtime, 0)
+            (duty_a - self.half_deadtime, 65535)
         } else {
             (duty_a - self.half_deadtime, duty_a + self.half_deadtime)
-            // the second is + because they are assumed to be inverted
         };
         let (duty_bh, duty_bl) = if duty_b < self.half_deadtime {
             (0, duty_b + self.half_deadtime)
         } else if duty_b > 65535 - self.half_deadtime {
-            (duty_b - self.half_deadtime, 0)
+            (duty_b - self.half_deadtime, 65535)
         } else {
             (duty_b - self.half_deadtime, duty_b + self.half_deadtime)
-            // the second is + because they are assumed to be inverted
         };
         let (duty_ch, duty_cl) = if duty_c < self.half_deadtime {
             (0, duty_c + self.half_deadtime)
         } else if duty_c > 65535 - self.half_deadtime {
-            (duty_c - self.half_deadtime, 0)
+            (duty_c - self.half_deadtime, 65535)
         } else {
             (duty_c - self.half_deadtime, duty_c + self.half_deadtime)
-            // the second is + because they are assumed to be inverted
         };
 
         self.ah.set_duty_cycle_fraction(duty_ah, 65535).unwrap();
@@ -167,7 +164,7 @@ impl<
         self.set_srf_voltage_unsafe(v_srf_limited);
     }
 
-    fn set_rrf_voltage(&mut self, v_rrf: em::Vqd, rotor_angle_rads: em::EAngle) {
+    fn set_rrf_voltage(&mut self, v_rrf: em::Vqd, rotor_angle_rads: f32) {
         let v_srf_limited = v_rrf
             .limit(self.get_voltage_limit())
             .inverse_parks_transformation(rotor_angle_rads);

@@ -63,7 +63,7 @@ impl<A: pwm::SetDutyCycle, B: pwm::SetDutyCycle, C: pwm::SetDutyCycle> BLDCDrive
         self.set_srf_voltage_unsafe(v_srf_limited);
     }
 
-    fn set_rrf_voltage(&mut self, v_rrf: em::Vqd, rotor_angle_rads: em::EAngle) {
+    fn set_rrf_voltage(&mut self, v_rrf: em::Vqd, rotor_angle_rads: f32) {
         let v_srf_limited = v_rrf
             .limit(self.get_voltage_limit())
             .inverse_parks_transformation(rotor_angle_rads);
